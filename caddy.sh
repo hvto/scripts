@@ -9,23 +9,17 @@ die() {
     exit 1
 }
 
-command_exists() {
-    command -v "$1" >/dev/null 2>&1
-}
-
 if [ "$(id -u)" -ne 0 ]; then
     die "this script must be run as root"
 fi
 
-if ! command_exists systemctl; then
-    die "systemd is required"
-fi
+command -v systemctl >/dev/null 2>&1 || die "systemd is required"
+command -v dpkg >/dev/null 2>&1 || die "Debian/Ubuntu is required"
 
-if ! command_exists curl; then
-    echo "Installing required packages..."
-    apt-get update
-    apt-get install -y curl ca-certificates
-fi
+echo "Installing dependencies..."
+
+apt-get update
+apt-get install -y curl ca-certificates
 
 ARCH="$(dpkg --print-architecture)"
 
@@ -48,7 +42,7 @@ cleanup() {
 
 trap cleanup EXIT
 
-echo "Installing Caddy ${VERSION} (${ARCH})..."
+echo "Downloading Caddy ${VERSION} (${ARCH})..."
 
 curl -fL \
     --retry 3 \
@@ -56,9 +50,57 @@ curl -fL \
     -o "${TMP_DIR}/${PACKAGE}" \
     "$URL"
 
+echo "Installing Caddy..."
+
 apt-get install -y "${TMP_DIR}/${PACKAGE}"
 
-mkdir -p /etc/systemd/system/caddy.service.d
+if ! id caddy >/dev/null 2>&1; then
+    die "caddy user was not created by the package"
+fi
+
+echo "Configuring Caddy data directory..."
+
+install -d \
+    -o caddy \
+    -g caddy \
+    -m 0750 \
+    /var/lib/caddy
+
+chown -R caddy:caddy /var/lib/caddy
+
+install -d \
+    -o caddy \
+    -g caddy \
+    -m 0750 \
+    /var/lib/caddy/.local
+
+install -d \
+    -o caddy \
+    -g caddy \
+    -m 0750 \
+    /var/lib/caddy/.local/share
+
+install -d \
+    -o caddy \
+    -g caddy \
+    -m 0750 \
+    /var/lib/caddy/.local/share/caddy
+
+install -d \
+    -o caddy \
+    -g caddy \
+    -m 0750 \
+    /var/lib/caddy/.config
+
+install -d \
+    -o caddy \
+    -g caddy \
+    -m 0750 \
+    /var/lib/caddy/.config/caddy
+
+echo "Configuring systemd..."
+
+install -d -m 0755 /etc/systemd/system/caddy.service.d
 
 cat > /etc/systemd/system/caddy.service.d/restart.conf <<'EOF'
 [Service]
@@ -69,18 +111,29 @@ EOF
 systemctl daemon-reload
 systemctl enable caddy.service
 
+if ! runuser -u caddy -- test -w /var/lib/caddy; then
+    die "/var/lib/caddy is not writable by caddy"
+fi
+
+if ! runuser -u caddy -- test -w /var/lib/caddy/.local/share/caddy; then
+    die "Caddy data directory is not writable"
+fi
+
 echo
 echo "Caddy ${VERSION} installed successfully."
 echo
-echo "Binary: /usr/bin/caddy"
-echo "Config: /etc/caddy/Caddyfile"
+echo "Binary:  /usr/bin/caddy"
+echo "Config:  /etc/caddy/Caddyfile"
+echo "Data:    /var/lib/caddy/.local/share/caddy"
 echo "Service: caddy.service"
 echo
-echo "Edit the configuration:"
-echo " nano /etc/caddy/Caddyfile"
+echo "Restart policy: on-failure (2 seconds)"
 echo
-echo "Then start Caddy:"
-echo " systemctl start caddy"
+echo "Edit configuration:"
+echo "  nano /etc/caddy/Caddyfile"
+echo
+echo "Start Caddy:"
+echo "  systemctl start caddy"
 echo
 echo "Check status:"
-echo " systemctl status caddy"
+echo "  systemctl status caddy"
