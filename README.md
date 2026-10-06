@@ -9,6 +9,7 @@
 | Script | Description |
 | --- | --- |
 | `realm.sh` | Установка и настройка [Realm](https://github.com/zhboner/realm) |
+| `caddy.sh` | Установка и настройка [Caddy](https://caddyserver.com/) |
 
 Список будет дополняться.
 
@@ -22,10 +23,20 @@ chmod +x realm.sh
 sudo ./realm.sh
 ```
 
+```bash
+curl -fsSLO https://raw.githubusercontent.com/hvto/scripts/main/caddy.sh
+chmod +x caddy.sh
+sudo ./caddy.sh
+```
+
 Или запустить напрямую:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/hvto/scripts/main/realm.sh | sudo bash
+```
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/hvto/scripts/main/caddy.sh | sudo bash
 ```
 
 ## Style
