@@ -15,6 +15,7 @@ fi
 
 command -v systemctl >/dev/null 2>&1 || die "systemd is required"
 command -v dpkg >/dev/null 2>&1 || die "Debian/Ubuntu is required"
+command -v runuser >/dev/null 2>&1 || die "runuser is required"
 
 echo "Installing dependencies..."
 
@@ -58,45 +59,22 @@ if ! id caddy >/dev/null 2>&1; then
     die "caddy user was not created by the package"
 fi
 
-echo "Configuring Caddy data directory..."
+echo "Configuring Caddy directories..."
 
-install -d \
-    -o caddy \
-    -g caddy \
-    -m 0750 \
-    /var/lib/caddy
+install -d -o caddy -g caddy -m 0750 \
+    /var/lib/caddy \
+    /var/lib/caddy/.local \
+    /var/lib/caddy/.local/share \
+    /var/lib/caddy/.local/share/caddy \
+    /var/lib/caddy/.config \
+    /var/lib/caddy/.config/caddy
+
+echo "Fixing Caddy ownership and permissions..."
 
 chown -R caddy:caddy /var/lib/caddy
 
-install -d \
-    -o caddy \
-    -g caddy \
-    -m 0750 \
-    /var/lib/caddy/.local
-
-install -d \
-    -o caddy \
-    -g caddy \
-    -m 0750 \
-    /var/lib/caddy/.local/share
-
-install -d \
-    -o caddy \
-    -g caddy \
-    -m 0750 \
-    /var/lib/caddy/.local/share/caddy
-
-install -d \
-    -o caddy \
-    -g caddy \
-    -m 0750 \
-    /var/lib/caddy/.config
-
-install -d \
-    -o caddy \
-    -g caddy \
-    -m 0750 \
-    /var/lib/caddy/.config/caddy
+find /var/lib/caddy -type d -exec chmod 750 {} +
+find /var/lib/caddy -type f -exec chmod 640 {} +
 
 echo "Configuring systemd..."
 
@@ -111,13 +89,28 @@ EOF
 systemctl daemon-reload
 systemctl enable caddy.service
 
-if ! runuser -u caddy -- test -w /var/lib/caddy; then
-    die "/var/lib/caddy is not writable by caddy"
+echo "Verifying Caddy permissions..."
+
+for DIR in \
+    /var/lib/caddy \
+    /var/lib/caddy/.local \
+    /var/lib/caddy/.local/share \
+    /var/lib/caddy/.local/share/caddy \
+    /var/lib/caddy/.config/caddy
+do
+    if ! runuser -u caddy -- test -w "$DIR"; then
+        die "$DIR is not writable by caddy"
+    fi
+done
+
+echo "Checking certificate storage permissions..."
+
+if ! runuser -u caddy -- \
+    mkdir -p /var/lib/caddy/.local/share/caddy/certificates; then
+    die "Caddy cannot create certificate storage"
 fi
 
-if ! runuser -u caddy -- test -w /var/lib/caddy/.local/share/caddy; then
-    die "Caddy data directory is not writable"
-fi
+echo "Caddy permissions verified successfully."
 
 echo
 echo "Caddy ${VERSION} installed successfully."
