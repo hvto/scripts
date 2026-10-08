@@ -10,26 +10,11 @@
 | --- | --- |
 | `realm.sh` | Установка и настройка [Realm](https://github.com/zhboner/realm) |
 | `caddy.sh` | Установка и настройка [Caddy](https://caddyserver.com/) |
+| `bbr.sh` | Включение и настройка BBR (оптимизация сети) |
 
 Список будет дополняться.
 
 ## Usage
-
-Скрипты можно скачать и запустить вручную:
-
-```bash
-curl -fsSLO https://raw.githubusercontent.com/hvto/scripts/main/realm.sh
-chmod +x realm.sh
-sudo ./realm.sh
-```
-
-```bash
-curl -fsSLO https://raw.githubusercontent.com/hvto/scripts/main/caddy.sh
-chmod +x caddy.sh
-sudo ./caddy.sh
-```
-
-Или запустить напрямую:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/hvto/scripts/main/realm.sh | sudo bash
@@ -37,6 +22,10 @@ curl -fsSL https://raw.githubusercontent.com/hvto/scripts/main/realm.sh | sudo b
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/hvto/scripts/main/caddy.sh | sudo bash
+```
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/hvto/scripts/main/bbr.sh | sudo bash
 ```
 
 ## Style
