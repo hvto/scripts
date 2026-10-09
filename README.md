@@ -11,6 +11,7 @@
 | `realm.sh` | Установка и настройка [Realm](https://github.com/zhboner/realm) |
 | `caddy.sh` | Установка и настройка [Caddy](https://caddyserver.com/) |
 | `bbr.sh` | Включение и настройка BBR (оптимизация сети) |
+| `fail2ban.sh` | Защита SSH от перебора паролей и ботов |
 
 Список будет дополняться.
 
@@ -26,6 +27,10 @@ curl -fsSL https://raw.githubusercontent.com/hvto/scripts/main/caddy.sh | sudo b
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/hvto/scripts/main/bbr.sh | sudo bash
+```
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/hvto/scripts/main/fail2ban.sh | sudo bash
 ```
 
 ## Style
