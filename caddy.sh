@@ -40,8 +40,10 @@ die() {
 # Requirements
 [ "$(id -u)" -eq 0 ] || die "this script must be run as root"
 
-for cmd in systemctl dpkg dpkg-deb apt-get runuser getent sha256sum; do
-    command -v "$cmd" >/dev/null 2>&1 || die "missing command: $cmd"
+for cmd in systemctl dpkg dpkg-deb dpkg-query apt-get \
+           runuser getent sha256sum sha512sum awk; do
+    command -v "$cmd" >/dev/null 2>&1 || \
+        die "missing command: $cmd"
 done
 
 [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || \
@@ -60,7 +62,7 @@ info "Installing dependencies..."
 apt-get update
 apt-get install -y --no-install-recommends curl ca-certificates
 
-# Download
+# Package
 PACKAGE="caddy_${VERSION}_linux_${ARCH}.deb"
 CHECKSUMS="caddy_${VERSION}_checksums.txt"
 BASE_URL="https://github.com/caddyserver/caddy/releases/download/v${VERSION}"
@@ -68,11 +70,14 @@ BASE_URL="https://github.com/caddyserver/caddy/releases/download/v${VERSION}"
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
 
-INSTALLED_VERSION="$(dpkg-query -W -f='${Version}' caddy 2>/dev/null || true)"
+INSTALLED_VERSION="$(
+    dpkg-query -W -f='${Version}' caddy 2>/dev/null || true
+)"
 
 if [ "$INSTALLED_VERSION" = "$VERSION" ]; then
     success "Caddy ${VERSION} already installed"
 else
+    # Download
     info "Downloading Caddy ${VERSION} (${ARCH})..."
 
     curl -fsSL --retry 3 --connect-timeout 10 \
@@ -84,22 +89,61 @@ else
         "$BASE_URL/$CHECKSUMS"
 
     # Verify checksum
-    info "Verifying checksum..."
+    info "Verifying package checksum..."
 
-    (
-        cd "$TMP_DIR"
-        grep -E "^[0-9a-fA-F]{64} [ *]${PACKAGE}$" "$CHECKSUMS" |
-            sha256sum -c -
-    ) || die "checksum verification failed"
+    EXPECTED_HASH="$(
+        awk -v file="$PACKAGE" '
+            {
+                name = $NF
+                sub(/^\*/, "", name)
+                sub(/^\.\//, "", name)
+
+                if (name == file) {
+                    print $1
+                    exit
+                }
+            }
+        ' "$TMP_DIR/$CHECKSUMS"
+    )"
+
+    [ -n "$EXPECTED_HASH" ] || \
+        die "checksum not found for $PACKAGE"
+
+    case "${#EXPECTED_HASH}" in
+        64)
+            HASH_CMD="sha256sum"
+            ;;
+        128)
+            HASH_CMD="sha512sum"
+            ;;
+        *)
+            die "unsupported checksum format"
+            ;;
+    esac
+
+    [[ "$EXPECTED_HASH" =~ ^[0-9a-fA-F]+$ ]] || \
+        die "invalid checksum"
+
+    ACTUAL_HASH="$("$HASH_CMD" "$TMP_DIR/$PACKAGE")"
+    ACTUAL_HASH="${ACTUAL_HASH%% *}"
+
+    [ "${ACTUAL_HASH,,}" = "${EXPECTED_HASH,,}" ] || \
+        die "checksum mismatch for $PACKAGE"
+
+    success "Package checksum verified"
 
     # Verify package metadata
-    [ "$(dpkg-deb -f "$TMP_DIR/$PACKAGE" Package)" = "caddy" ] || \
-        die "invalid package name"
+    info "Checking package metadata..."
 
-    [ "$(dpkg-deb -f "$TMP_DIR/$PACKAGE" Architecture)" = "$ARCH" ] || \
-        die "invalid package architecture"
-
+    PKG_NAME="$(dpkg-deb -f "$TMP_DIR/$PACKAGE" Package)"
+    PKG_ARCH="$(dpkg-deb -f "$TMP_DIR/$PACKAGE" Architecture)"
     PKG_VERSION="$(dpkg-deb -f "$TMP_DIR/$PACKAGE" Version)"
+
+    [ "$PKG_NAME" = "caddy" ] || \
+        die "unexpected package name: $PKG_NAME"
+
+    [ "$PKG_ARCH" = "$ARCH" ] || \
+        die "unexpected package architecture: $PKG_ARCH"
 
     case "$PKG_VERSION" in
         "$VERSION"|"$VERSION"-*|"$VERSION"+*) ;;
@@ -110,7 +154,8 @@ else
     info "Checking package dependencies..."
 
     APT_PLAN="$(
-        apt-get -s --no-install-recommends install "$TMP_DIR/$PACKAGE"
+        apt-get -s --no-install-recommends \
+            install "$TMP_DIR/$PACKAGE"
     )" || die "dependency resolution failed"
 
     if printf '%s\n' "$APT_PLAN" |
@@ -121,7 +166,8 @@ else
     # Install
     info "Installing Caddy..."
 
-    apt-get install -y --no-install-recommends "$TMP_DIR/$PACKAGE"
+    apt-get install -y --no-install-recommends \
+        "$TMP_DIR/$PACKAGE"
 
     success "Caddy ${VERSION} installed"
 fi
@@ -137,36 +183,47 @@ systemctl cat caddy.service >/dev/null 2>&1 || \
     die "caddy.service not found"
 
 SERVICE_USER="$(systemctl show caddy.service -p User --value)"
+SERVICE_GROUP="$(systemctl show caddy.service -p Group --value)"
+
 [ "$SERVICE_USER" = "caddy" ] || \
     die "caddy.service must run as user caddy"
 
+if [ -n "$SERVICE_GROUP" ] && [ "$SERVICE_GROUP" != "caddy" ]; then
+    die "unexpected service group: $SERVICE_GROUP"
+fi
+
 CADDY_HOME="$(getent passwd caddy | cut -d: -f6)"
+
 [ "$CADDY_HOME" = "/var/lib/caddy" ] || \
     die "unexpected Caddy home: $CADDY_HOME"
 
-# Storage permissions
+# Storage
 info "Checking Caddy storage..."
 
-install -d -o caddy -g caddy -m 0700 /var/lib/caddy
+STORAGE_DIR="/var/lib/caddy/.local/share/caddy"
+CONFIG_DIR="/var/lib/caddy/.config/caddy"
+
+# Create the home directory only when missing.
+# Do not change ownership of existing data.
+if [ ! -d "$CADDY_HOME" ]; then
+    install -d -o caddy -g caddy -m 0700 "$CADDY_HOME"
+fi
+
+runuser -u caddy -- test -w "$CADDY_HOME" || \
+    die "Caddy home is not writable"
 
 for dir in \
     /var/lib/caddy/.local \
     /var/lib/caddy/.local/share \
-    /var/lib/caddy/.local/share/caddy \
+    "$STORAGE_DIR" \
     /var/lib/caddy/.config \
-    /var/lib/caddy/.config/caddy
+    "$CONFIG_DIR"
 do
     if [ ! -d "$dir" ]; then
         runuser -u caddy -- mkdir -m 0700 "$dir" || \
             die "cannot create directory: $dir"
     fi
-done
 
-for dir in \
-    /var/lib/caddy \
-    /var/lib/caddy/.local/share/caddy \
-    /var/lib/caddy/.config/caddy
-do
     runuser -u caddy -- test -w "$dir" || \
         die "directory not writable by caddy: $dir"
 done
@@ -186,6 +243,7 @@ if [ ! -e "$OVERRIDE" ]; then
 Restart=on-failure
 RestartSec=2s
 EOF
+
     success "Restart policy configured"
 else
     warn "Existing restart override preserved"
@@ -194,15 +252,9 @@ fi
 systemctl daemon-reload
 systemctl enable caddy.service >/dev/null
 
-# Final checks
-info "Checking service configuration..."
+success "Systemd configured"
 
-SERVICE_GROUP="$(systemctl show caddy.service -p Group --value)"
-
-if [ -n "$SERVICE_GROUP" ] && [ "$SERVICE_GROUP" != "caddy" ]; then
-    die "unexpected service group: $SERVICE_GROUP"
-fi
-
+# Service status
 if systemctl is-active --quiet caddy.service; then
     success "Caddy service is running"
 else
@@ -216,7 +268,7 @@ success "Caddy ${VERSION} is ready"
 echo
 echo "Binary:  /usr/bin/caddy"
 echo "Config:  /etc/caddy/Caddyfile"
-echo "Data:    /var/lib/caddy/.local/share/caddy"
+echo "Data:    $STORAGE_DIR"
 echo "Service: caddy.service"
 echo
 echo "Start:   systemctl start caddy"
